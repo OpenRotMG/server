@@ -112,6 +112,102 @@ fn named_teleport_preserves_native_guards_and_shared_chat_throttle() {
     assert!(d.teleports.is_empty());
 }
 
+fn quest_setup() -> (
+    Directory,
+    i32,
+    i32,
+    mpsc::Receiver<Packet>,
+    mpsc::Receiver<Packet>,
+    i32,
+    i32,
+) {
+    let (mut d, a, b, ar, br) = setup();
+    let w = d.worlds.get_mut(&-2).unwrap();
+    w.name = "Realm".into();
+    w.safe = false;
+    w.players.get_mut(&a).unwrap().character.level = 10;
+    let origin = w.players[&a].pos;
+    let destination = (0..w.map.height)
+        .flat_map(|y| {
+            (0..w.map.width).map(move |x| Pos {
+                x: x as f32 + 0.5,
+                y: y as f32 + 0.5,
+            })
+        })
+        .find(|p| origin.distance(*p) > 40. && w.player_position_valid(None, *p))
+        .unwrap();
+    w.players.get_mut(&b).unwrap().pos = destination;
+    let lich = w.spawn_entity(0x91b, origin, vec![]).unwrap();
+    let ent = w.spawn_entity(0x91f, destination, vec![]).unwrap();
+    (d, a, b, ar, br, lich, ent)
+}
+
+#[test]
+fn quest_marker_retargets_equally_suitable_boss_after_native_teleport() {
+    let (mut d, a, b, mut ar, _br, lich, ent) = quest_setup();
+    let w = d.worlds.get_mut(&-2).unwrap();
+    assert_eq!(w.content.objects[&0x91b].quest_level, Some(9));
+    assert_eq!(w.content.objects[&0x91f].quest_level, Some(11));
+    w.updates(a, false).unwrap();
+    assert_eq!(w.players[&a].quest, Some(lich));
+    assert!(!w.players[&a].known.contains(&ent));
+    while ar.try_recv().is_ok() {}
+    d.teleport(a, b, Instant::now()).unwrap();
+    let w = &d.worlds[&-2];
+    assert_eq!(
+        w.players[&a].quest,
+        Some(ent),
+        "level 11 is as suitable as level 9 for a level-10 player"
+    );
+    assert!(w.players[&a].known.contains(&ent));
+    assert!(!w.players[&a].known.contains(&lich));
+    assert_eq!(d.player_view(a).unwrap().quest, Some(ent));
+    let packets: Vec<_> = std::iter::from_fn(|| ar.try_recv().ok()).collect();
+    let update = packets.iter().position(|p| p.id == wire::UPDATE).unwrap();
+    let quest = packets.iter().position(|p| p.id == 34).unwrap();
+    assert!(
+        update < quest,
+        "publish the new target before its quest pointer"
+    );
+    let mut r = Reader::new(&packets[quest].body);
+    assert_eq!(r.i32().unwrap(), ent);
+    r.done().unwrap();
+}
+
+#[test]
+fn quest_marker_keeps_level_priority_and_excludes_unavailable_targets() {
+    let (mut d, a, b, mut ar, _br, lich, ent) = quest_setup();
+    let w = d.worlds.get_mut(&-2).unwrap();
+    w.players.get_mut(&a).unwrap().character.level = 11;
+    assert_eq!(
+        w.quest_target(a),
+        Some(ent),
+        "closer does not override a better level match"
+    );
+    w.updates(a, false).unwrap();
+    w.players.get_mut(&a).unwrap().character.level = 10;
+    w.players.get_mut(&a).unwrap().pos = w.players[&b].pos;
+    assert_eq!(w.quest_target(a), Some(ent));
+    w.entities.get_mut(&ent).unwrap().published = false;
+    assert_eq!(w.quest_target(a), Some(lich));
+    w.entities.get_mut(&ent).unwrap().published = true;
+    w.entities.get_mut(&ent).unwrap().extra_stats.push((54, 99));
+    assert_eq!(w.quest_target(a), Some(lich));
+    w.entities.get_mut(&ent).unwrap().extra_stats.clear();
+    w.entities.get_mut(&ent).unwrap().hp = 0;
+    assert_eq!(w.quest_target(a), Some(lich));
+    w.entities.get_mut(&lich).unwrap().hp = 0;
+    while ar.try_recv().is_ok() {}
+    w.updates(a, false).unwrap();
+    let packet = std::iter::from_fn(|| ar.try_recv().ok())
+        .find(|p| p.id == 34)
+        .unwrap();
+    assert_eq!(Reader::new(&packet.body).i32().unwrap(), -1);
+    w.entities.get_mut(&ent).unwrap().hp = 1;
+    w.safe = true;
+    assert_eq!(w.quest_target(a), None);
+}
+
 #[test]
 fn selected_minimap_teleport_goto_effect_and_current_view() {
     let (mut d, a, b, mut ar, mut br) = setup();
