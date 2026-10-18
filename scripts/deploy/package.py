@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 
 sys.dont_write_bytecode = True
+from realm_contract import check_realms
 revision, binary, output = sys.argv[1:]
 assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == revision
 output = Path(output)
@@ -26,6 +27,7 @@ with tempfile.TemporaryDirectory() as temporary:
     sys.path.insert(0, str(stage / 'scripts/backups'))
     from release_contract import check
     check(stage / 'openrotmg', stage / 'data', root / 'contract', revision)
+    check_realms(stage / 'openrotmg', stage / 'data', root / 'realm-data')
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = {str(p.relative_to(stage)): digest(p) for p in sorted(stage.rglob('*')) if p.is_file()}
     with tarfile.open(output / 'server.tar.gz', 'w:gz') as archive:

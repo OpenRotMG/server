@@ -627,6 +627,11 @@ impl Map {
         Self::decode(&bytes, content).with_context(|| format!("load map {}", path.display()))
     }
     pub(crate) fn decode(bytes: &[u8], content: &Content) -> Result<Self> {
+        let map = Self::decode_cells(bytes, content)?;
+        ensure!(!map.spawns.is_empty(), "map has no spawn cells");
+        Ok(map)
+    }
+    pub(crate) fn decode_cells(bytes: &[u8], content: &Content) -> Result<Self> {
         let mut data = Vec::new();
         flate2::read::ZlibDecoder::new(bytes)
             .take(16 * 1024 * 1024 + 1)
@@ -686,7 +691,6 @@ impl Map {
             }
         }
         ensure!(r.pos == r.data.len(), "trailing map data");
-        ensure!(!spawns.is_empty(), "map has no spawn cells");
         Ok(Self {
             width,
             height,
@@ -705,6 +709,82 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn map_cell_decoding_preserves_validation() {
+        use std::io::Write;
+        let mut content = Content::load(Path::new("data")).unwrap();
+        let raw_map = |ground: i16, name: &str, width: i32, height: i32, index: i16| {
+            let mut raw = Vec::new();
+            raw.extend(1i16.to_le_bytes());
+            raw.extend(ground.to_le_bytes());
+            raw.push(name.len() as u8);
+            raw.extend(name.as_bytes());
+            raw.extend([0, 11, 1]);
+            raw.extend(width.to_le_bytes());
+            raw.extend(height.to_le_bytes());
+            raw.extend(index.to_le_bytes());
+            raw
+        };
+        let valid = raw_map(0xbe, "", 1, 1, 0);
+        let mut truncated = valid.clone();
+        truncated.pop();
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        let mut invalid_utf8 = raw_map(0xbe, "x", 1, 1, 0);
+        invalid_utf8[5] = 0xff;
+        let mut ambiguous = content.objects[&0x105].clone();
+        ambiguous.kind = 0xffff;
+        content.objects.insert(ambiguous.kind, ambiguous);
+        for (raw, expected) in [
+            (vec![], "truncated map"),
+            (vec![0, 0], "empty map dictionary"),
+            (raw_map(256, "", 1, 1, 0), "out of range"),
+            (raw_map(0x08, "", 1, 1, 0), "unknown map ground"),
+            (
+                raw_map(0xbe, "missing-object", 1, 1, 0),
+                "unknown map object",
+            ),
+            (raw_map(0xbe, "Bush", 1, 1, 0), "ambiguous map object"),
+            (invalid_utf8, "invalid utf-8"),
+            (
+                vec![1, 0, 0xbe, 0, 0x80, 0x80, 0x80, 0x80, 0x80],
+                "map string length overflow",
+            ),
+            (raw_map(0xbe, "", 0, 1, 0), "map dimensions"),
+            (raw_map(0xbe, "", 1, -1, 0), "map dimensions"),
+            (raw_map(0xbe, "", 2049, 1, 0), "map dimensions"),
+            (raw_map(0xbe, "", 1, 2049, 0), "map dimensions"),
+            (raw_map(0xbe, "", 1, 1, 1), "invalid map dictionary index"),
+            (raw_map(0xbe, "", 1, 1, -1), "out of range"),
+            (truncated, "truncated map"),
+            (trailing, "trailing map data"),
+            (
+                vec![0; 16 * 1024 * 1024 + 1],
+                "decompressed map exceeds 16 MiB",
+            ),
+        ] {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+            encoder.write_all(&raw).unwrap();
+            let bytes = encoder.finish().unwrap();
+            for decode in [Map::decode, Map::decode_cells] {
+                let error = format!("{:#}", decode(&bytes, &content).unwrap_err());
+                assert!(error.contains(expected), "expected {expected}: {error}");
+            }
+            let source = crate::terrain::realms::Source::encoded_fixture("malformed-test", bytes);
+            let error = format!("{:#}", source.open(&content).unwrap_err());
+            assert!(
+                error.contains("decode Realm layout malformed-test"),
+                "{error}"
+            );
+            assert!(error.contains(expected), "expected {expected}: {error}");
+        }
+        for bytes in [&b"not zlib"[..], &b"\x78\x9c\xff\xff\xff\xff"[..]] {
+            assert!(Map::decode_cells(bytes, &content).is_err());
+            assert!(Map::decode(bytes, &content).is_err());
+        }
+    }
+
     #[test]
     fn selected_legacy_sounds_are_present() {
         let xml = std::fs::read_to_string("data/objects.xml").unwrap();

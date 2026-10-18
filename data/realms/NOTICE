@@ -1,0 +1,32 @@
+Classic Worlds 2 and 3 candidate reconstructions, not authenticated original maps.
+
+Frozen 20927-1 and 84542-1 Perlin layers were exported twice under Ruffle from Amit J Patel's
+legacy demo, https://theory.stanford.edu/~amitp/_test/mapgen2-13.swf, linked in
+https://simblob.blogspot.com/2012/02/polygon-map-generation-faq.html.
+world02.json and world03.json pin byte hashes, x-major orientation, emulator and source identity.
+The executable's exact source revision is unverified. No exporter, source dump,
+client dump, sprites or historical catalogue image is bundled here.
+
+Source/rights review: Map generation project, Copyright 2010 Amit J Patel,
+MIT notice retained in MAPGEN2-LICENSE. The arrays are generated numeric output;
+this notice does not relicense any third-party game content or claim permission
+for the selected client's assets. WMAP references the existing selected-client
+names/IDs; only the project's existing scenery palette is reused.
+
+classic-v1 uses direct byte elevation boundaries 51/153/204 and moisture
+boundaries 3/7, 4/7, 5/7, not a private-server height curve. Largest four-neighbor non-ocean mainland is retained (lakes/channels do not
+split it); detached islands/coasts become empty ocean. This is a calibrated
+reconstruction policy, not recovered official processing. Mainland exported coast,
+roads, bridges, rivers and lakes are retained. Wet lowlands within eight tiles
+of coast use ShorePlains. Generic demo lava becomes shallow water, ice becomes
+lake water, snow becomes Snowy Rock: no new damaging/freezing ground.
+Scenery/configuration is deterministic reconstruction, not recovered placement.
+Catalogue coastline/road/lake/Godlands alignment is approximate: island outlines,
+polygon detail, snow extent, historical structures and unverified variant remain
+unresolved.
+
+Rebuild offline from checkout data (no client, game state or exporter required):
+  openrotmg build-realm --data data --id classic-world-02-reconstruction
+  openrotmg build-realm --data data --id classic-world-02-reconstruction --check
+  openrotmg build-realm --data data --id classic-world-03-reconstruction
+  openrotmg build-realm --data data --id classic-world-03-reconstruction --check

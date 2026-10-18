@@ -19,9 +19,15 @@ mod world;
 use anyhow::{Result, ensure};
 use rand::RngCore;
 use std::sync::Arc;
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if terrain::prepare::run(&args)? {
+        return Ok(());
+    }
+    serve(args)
+}
+#[tokio::main]
+async fn serve(args: Vec<String>) -> Result<()> {
     if backup::run(&args).await? {
         return Ok(());
     }

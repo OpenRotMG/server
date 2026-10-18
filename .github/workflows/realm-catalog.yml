@@ -1,0 +1,34 @@
+name: Realm catalog
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: realm-catalog-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  staged-catalog:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.94.1 --profile minimal
+      - name: Verify staged full-size Realm constructors
+        run: |
+          cargo +1.94.1 build --locked --release
+          python3 -B scripts/deploy/package.py "$GITHUB_SHA" target/release/openrotmg dist
+          mkdir staged-release
+          tar -xzf dist/server.tar.gz -C staged-release
+          cargo +1.94.1 test --locked --no-run --message-format=json > test-executables.jsonl
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          artifacts = [json.loads(line) for line in pathlib.Path('test-executables.jsonl').read_text().splitlines()]
+          tests = [pathlib.Path(a['executable']).resolve() for a in artifacts if a.get('executable') and a.get('profile', {}).get('test') and a['target']['name'] == 'openrotmg']
+          if len(tests) != 1:
+              raise RuntimeError(f'Expected one server test executable, got {tests}')
+          subprocess.run([str(tests[0]), 'world::realm_maps_tests::', '--nocapture'], cwd='staged-release', check=True)
+          PY

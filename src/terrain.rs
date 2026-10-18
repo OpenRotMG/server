@@ -1,7 +1,10 @@
+use crate::content::Cell;
 #[cfg(test)]
-use crate::content::{Cell, Content, Map};
+use crate::content::{Content, Map};
+use anyhow::Result;
 #[cfg(test)]
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, ensure};
+pub(crate) mod prepare;
 pub(crate) mod realms;
 #[cfg(test)]
 mod rivers;
@@ -66,7 +69,6 @@ fn biome(depth: f64, moisture: f64, radius: f64) -> (u8, u8) {
     }
 }
 
-#[cfg(test)]
 fn decorate(cell: &mut Cell, random: u64) -> Result<()> {
     let trees: &[u16] = &[0x100, 0x101, 0x105, 0x106];
     let floor: &[u16] = &[

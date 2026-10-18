@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "id": "classic-world-03-reconstruction",
+  "profile": "classic-v1",
+  "width": 2048,
+  "height": 2048,
+  "orientation": "x-major",
+  "scenery_seed": 84542,
+  "content": {
+    "objects": "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72",
+    "grounds": "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7"
+  },
+  "layers": {
+    "elevation": {
+      "path": "world03/elevation.data.zlib",
+      "sha256": "84db4106e708398c4cc89b22bc6c12cf6e1c27ab8990a43b5721e81ff839faf4"
+    },
+    "moisture": {
+      "path": "world03/moisture.data.zlib",
+      "sha256": "b0991399bc8522d68b2f5398ae14e71dbe1a3ee4118fecf207527d31afcb4887"
+    },
+    "overrides": {
+      "path": "world03/overrides.data.zlib",
+      "sha256": "33ca0a9180d2443bf6618453b344c6cc2342906f6b12fecb477ab8b1579e3322"
+    }
+  },
+  "output": "classic-world-03-reconstruction.wmap",
+  "provenance": {
+    "source_url": "https://github.com/amitp/mapgen2/tree/d104774369dd9a5f4c49aa5ce3f01a225ead65dc",
+    "source_sha256": "2a63761ea0c1862cd61a82d007e455f43b0c83a8226b95dcaf5c8e54ff79d208",
+    "exporter_url": "https://theory.stanford.edu/~amitp/_test/mapgen2-13.swf",
+    "exporter_sha256": "0ae220f48a9a7431805591d7347d916c5443434b68bc113b32eee1310f14a0e6",
+    "emulator": "Ruffle 0.7.1-openrotmg.2; built 2026-10-14; commit 89a7049965f3090e706265670df309a5128233ac",
+    "mode": "Perlin",
+    "seed_variant": "84542-1",
+    "status": "Candidate reconstruction; not an authenticated original. Frozen legacy export; compiled exporter revision unpinned. Direct byte elevation thresholds, reconstructed habitats and scenery; historical structures omitted. Primary mainland retained; detached islands removed by shared four-neighbor non-ocean policy. Mainland river network retained; generic lava is water, generic ice is lake. Coast and polygon details differ from catalogue."
+  }
+}
