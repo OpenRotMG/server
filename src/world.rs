@@ -2905,8 +2905,13 @@ impl World {
             "player busy, departing or dead"
         );
         ensure!(
-            from.object == id || to.object == id,
-            "swap must involve own inventory"
+            from.object == id
+                || to.object == id
+                || self
+                    .vault
+                    .as_ref()
+                    .is_some_and(|(chest, _)| { from.object == *chest && to.object == *chest }),
+            "swap must involve own inventory or the vault chest"
         );
         let mut items = p.character.items.clone();
         let bag_id = if from.object != id {
@@ -5567,7 +5572,11 @@ mod tests {
     async fn sourced_private_chest_publishes_only_atomic_character_vault_commit() {
         use crate::store::{InventoryWrite, Store};
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "vault-rearrangement-{:016x}.db",
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &content).unwrap();
         let account = store.list("vault-actor".into()).await.unwrap();
         let ch = store
             .create(account.id, content.get(crate::content::WIZARD).unwrap())
@@ -5623,6 +5632,146 @@ mod tests {
         assert_eq!(saved.revision, 1);
         assert!(w.load_vault(original).is_err());
         w.load_vault(saved).unwrap();
+        for (from, to) in [
+            ((player, 0), (chest, 1)),
+            ((chest, 0), (chest, 2)),
+            ((chest, 2), (chest, 1)),
+        ] {
+            let slot = |(object, slot)| Slot {
+                object,
+                slot,
+                kind: if object == player {
+                    w.players[&player].character.items[slot]
+                } else {
+                    w.entities[&chest].items[slot]
+                },
+            };
+            let before = w.entities[&chest].items.clone();
+            let inventory = w.players[&player].character.items.clone();
+            let plan = w.swap(player, slot(from), slot(to)).unwrap();
+            if from.0 == chest {
+                assert_eq!(plan.items, inventory);
+            }
+            assert!(plan.collected.is_none() && plan.dropped.is_none());
+            assert!(w.players[&player].pending && w.entities[&chest].reserved);
+            assert!(
+                w.swap(
+                    player,
+                    Slot {
+                        object: chest,
+                        slot: 0,
+                        kind: before[0]
+                    },
+                    Slot {
+                        object: chest,
+                        slot: 1,
+                        kind: before[1]
+                    }
+                )
+                .is_err()
+            );
+            let revisions = store
+                .exchange(
+                    vec![InventoryWrite {
+                        id: plan.character,
+                        account: plan.account,
+                        revision: plan.revision,
+                        items: plan.items.clone(),
+                    }],
+                    plan.vault.clone(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(w.entities[&chest].items, before);
+            w.finish_inventory(plan, Ok(revisions[0])).unwrap();
+            assert_eq!(
+                w.entities[&chest].items,
+                store.vault(account.id).await.unwrap().items
+            );
+        }
+        let expected = vec![-1, 0xa22, 0xa97, -1, -1, -1, -1, -1];
+        assert_eq!(w.entities[&chest].items, expected);
+        assert_eq!(w.players[&player].character.revision, 4);
+        let from = Slot {
+            object: chest,
+            slot: 1,
+            kind: 0xa22,
+        };
+        let to = Slot {
+            object: chest,
+            slot: 2,
+            kind: 0xa97,
+        };
+        let other = w
+            .spawn_entity(0x504, w.entities[&chest].pos, vec![-1; 8])
+            .unwrap();
+        for (a, b) in [
+            (
+                from,
+                Slot {
+                    object: other,
+                    slot: 0,
+                    kind: -1,
+                },
+            ),
+            (
+                Slot {
+                    object: other,
+                    slot: 0,
+                    kind: -1,
+                },
+                Slot {
+                    object: other,
+                    slot: 1,
+                    kind: -1,
+                },
+            ),
+            (Slot { kind: -1, ..from }, to),
+            (from, Slot { kind: -1, ..to }),
+            (Slot { slot: 8, ..from }, to),
+            (from, Slot { slot: 8, ..to }),
+        ] {
+            assert!(w.swap(player, a, b).is_err());
+            assert!(!w.players[&player].pending && !w.entities[&chest].reserved);
+            assert_eq!(w.entities[&chest].items, expected);
+        }
+        let ownership = w.entities[&chest].extra_stats.clone();
+        w.entities.get_mut(&chest).unwrap().extra_stats = vec![(54, account.id + 1)];
+        assert!(w.swap(player, from, to).is_err());
+        w.entities.get_mut(&chest).unwrap().extra_stats = ownership;
+        w.players.get_mut(&player).unwrap().pos.x += 2.0;
+        assert!(w.swap(player, from, to).is_err());
+        w.players.get_mut(&player).unwrap().pos = w.entities[&chest].pos;
+        let plan = w.swap(player, from, to).unwrap();
+        let mut stale = plan.vault.clone().unwrap();
+        stale.revision += 1;
+        let failed = store
+            .exchange(
+                vec![InventoryWrite {
+                    id: plan.character,
+                    account: plan.account,
+                    revision: plan.revision,
+                    items: plan.items.clone(),
+                }],
+                Some(stale),
+            )
+            .await
+            .unwrap_err();
+        assert!(w.finish_inventory(plan, Err(failed)).is_err());
+        assert!(w.players[&player].persistence_failure.is_some() && w.entities[&chest].reserved);
+        assert_eq!(w.entities[&chest].items, expected);
+        drop(store);
+        let reopened = Store::open(&path, &w.content).unwrap();
+        let vault = reopened.vault(account.id).await.unwrap();
+        assert_eq!((vault.revision, vault.items), (4, expected));
+        let character = reopened
+            .load(account.id, w.players[&player].character.id)
+            .await
+            .unwrap();
+        assert_eq!(character.revision, 4);
+        assert_eq!(character.items, w.players[&player].character.items);
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn ground_drop_is_hidden_until_commit_and_quarantines_uncertain_failure() {
